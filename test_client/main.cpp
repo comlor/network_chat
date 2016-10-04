@@ -14,6 +14,7 @@
 #include <cassert>
 
 #define PORT "30001"
+#define CLIENT_IP "192.168.1.42"
 
 struct sockaddr name;
 
@@ -48,7 +49,7 @@ int main(int agrc, char** argv) {
     hints.ai_flags = AI_PASSIVE;     //use local-host address
 
     //get server info, put into servinfo
-    if ((status = getaddrinfo("192.168.1.42", PORT, &hints, &servinfo)) != 0) {
+    if ((status = getaddrinfo(CLIENT_IP, PORT, &hints, &servinfo)) != 0) {
         fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
         exit(1);
     }
