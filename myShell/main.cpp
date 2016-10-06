@@ -1,8 +1,6 @@
 #include <iostream>
-#include <iomanip>
 #include <vector>
-#include <stdio.h>
-#include <pthread.h>
+#include <thread>
 
 #include <unistd.h>
 #include <sys/socket.h>
@@ -14,28 +12,18 @@
 #include <sys/wait.h>
 #include <signal.h>
 
-//using namespace std;
-
-// ****************************Global Variables****************************
-int NUM_ARGS = 5;
-#define NUM_THREADS 2
-
-struct tdata        // Thread Data for server listener
+// ****************GLOBAL VARIABLES****************
+struct tdata
 {
     int thread_id;
-    std::string input;
-    std::vector<std::string> the_args;
-    std::vector<int> client_list;
-    int status = 1;
+    int status;
     int server;
     int time = 10;
+    bool connection_waiting = false;
+    bool exit_prog = false;
+    std::vector<int> client_list;
+    std::vector<struct sockaddr> client_addr;
 };
-
-//void error(char *msg)
-//{
-//    perror(msg);
-//    exit(1);
-//}
 
 void *get_in_addr(struct sockaddr *sa)
 {
@@ -44,134 +32,86 @@ void *get_in_addr(struct sockaddr *sa)
     return &(((struct sockaddr_in6*)sa)->sin6_addr);
 }
 
-// ************************************************************************
+tdata list;
+#define PORT = "30000"
+#define CLIENT_IP = "192.168.1.42"
+int NUM_ARGS = 5;
 
-// **************************Function Prototypes***************************
-// Core Functions
-void main_loop(std::string portNum);
-std::string read_input(void);
-std::vector<std::string> parse_input(std::string &);
-int ex_args(std::vector<std::string>);
-void *terminal_control(void* tdi);
-
-// Parameter Functions
-void help(); // Done
-void myIP();
-void myPort();
-void connect(std::string dest, int port);
-void listConnection();
-void terminate(int connect_id);
-void send(int connect_id, std::string message);
-void exit(); // Done
-
-// Server Functions
-int start_Server(std::string portNum); //Returns File Descriptor of server
+// ****************SERVER FUNCTIONS****************
+void my_shell(int td);
+int start_Server(std::string portNum);
 int server_Accept(int server_sock, std::vector<int> &client_list);
 int server_Send(int dest, int server, char *msg);
-void *server_Listener(void* td);        // Thread Listener Function
+char *server_Recv(int server);
+void server_Listener(int td);
 
-// ************************************************************************
+// ****************TERMINAL FUNCTIONS****************
+std::string read_input(void);
+std::vector<std::string> parse_input(std::string &in);
+int ex_args(std::vector<std::string> args);
+void help();
+void list_connections();
 
-// ******************************Main Function********************************
+// ******************MAIN FUNCTION*****************
 int main(int argc, char *argv[])
 {
-    std::cout<<std::endl<<std::endl<<std::endl;
-    std::string portNum = "30001";
+    std::cout<<std::endl<<std::endl;
+    list.thread_id = 1;
+    std::string port = "30001";
+    int istatus = 1;
 
-    main_loop(portNum);
+    int server = start_Server(port);
+    list.server = server;
 
-    std::cout<<"EXIT SUCCESS"<<std::endl;
-    return EXIT_SUCCESS;
+    std::thread terminal(my_shell,istatus);
+
+    std::thread server_listen(server_Listener, istatus);
+    server_listen.detach();
+
+    terminal.join();
+    list.connection_waiting = false;
+    list.exit_prog = true;
+
+    return 0;
 }
-// ***************************************************************************
 
-// ****************************Main Program Loop******************************
-void main_loop(std::__1::string portNum)
+// ******************THREAD FUNCTION*****************
+void my_shell(int td)
 {
-    pthread_t threads[NUM_THREADS];
-    tdata td;
-
-    std::string input;                  // For reading input from terminal
-    std::vector<std::string> the_args;  // For storing list of args at terminal
-    int status = 1;                     // General status for error messages
-    td.client_list.resize(10);             // Sets list to handle 10 clients
-    td.client_list.clear();                // Empties client list to start program
-
-    int server = start_Server(portNum); // Starts up the TCP server and returns FD
-    td.client_list.push_back(server);      // Adds server socket to client list[0]
-    td.server = server;
-
-    status = listen(td.server, 10);        // Listens for incoming connections
-    status = server_Accept(td.server, td.client_list);// Accepts incoming connections
-
-    int rcl = 0, rci = 0;
+    int status = 1;
+    std::string input;
+    std::vector<std::string> the_args;
 
     while(status)
     {
         std::cout<<"> ";
-        std::fflush(NULL);
-        input = read_input();
-        the_args = parse_input(input);
-        status = ex_args(the_args);
-
-//        td[0].thread_id = 0;
-//        td[0].connect_waiting = false;
-//        rcl = pthread_create(&threads[0], NULL,server_Listener, (void *)&td[0]);
-//        if (rcl)
-//        {
-//           std::cout << "Error:unable to create thread," << rcl << std::endl;
-//           exit(-1);
-//        }
-
-//        tdi.thread_id = 0;
-//        rci = pthread_create(&threads[1], NULL,terminal_control, (void *)&tdi);
-//        if (rci)
-//        {
-//           std::cout << "Error:unable to create thread," << rci << std::endl;
-//           exit(-1);
-//        }
-
-//        if(td[0].connect_waiting == true)
-//        {
-//            status = server_Accept(server, client_list);
-//            td[0].connect_waiting = false;
-//        }
-
-//        if(tdi.status == 0)
-//        {
-//            std::cout<<"EXITING"<<std::endl;
-//            pthread_cancel(threads[0]);
-//            status = 0;
-//        }
-    }
-//    pthread_exit(threads[0]);
-//    pthread_exit(threads[1]);
-
-    for(unsigned int i = 0; i < td.client_list.size(); i++)
-        shutdown(td.client_list.at(i), SHUT_RDWR);
-}
-// ***************************************************************************
-
-void *terminal_control(void* tdi)
-{
-    struct tdata_input *data;
-    data = (struct tdata_input *) tdi;
-    std::string input = "";                  // For reading input from terminal
-    std::vector<std::string> the_args;  // For storing list of args at terminal
-    the_args.resize(2);
-    the_args.clear();
-    int tstatus = 1;                     // General status for error messages
-
-    while(tstatus)
-    {
-        std::cout<<"> ";
-        std::fflush(NULL);
         input = read_input();
         the_args = parse_input(input);
         the_args.push_back(input);
-        tstatus = ex_args(the_args);
+        status = ex_args(the_args);
     }
-    return(NULL);
+}
+
+void server_Listener(int td)
+{
+    int client_sock, status;
+
+    while(list.exit_prog == false)
+    {
+        status = listen(list.server, list.time);
+
+        if(status == 0)
+            list.connection_waiting = true;
+
+        if(list.connection_waiting == true)
+        {
+            client_sock = server_Accept(list.server,list.client_list);
+            list.client_list.push_back(client_sock);
+            list.connection_waiting = false;
+        }
+        else if(list.exit_prog == true)
+            break;
+    }
 }
 
 // *****************************Read Console Input****************************
@@ -180,9 +120,9 @@ std::string read_input(void)
     //std::cout<<"READ"<<std::endl;
     std::string in;
     std::getline(std::cin, in);
+    std::fflush(NULL);
     return in;
 }
-// ***************************************************************************
 
 // *********************Parse Parameters from Console Input*******************
 std::vector<std::string> parse_input(std::string &in)
@@ -226,7 +166,6 @@ std::vector<std::string> parse_input(std::string &in)
     }
     return param;
 }
-// ***************************************************************************
 
 // ****************************Execute Parameters*****************************
 int ex_args(std::vector<std::string> args)
@@ -240,9 +179,15 @@ int ex_args(std::vector<std::string> args)
     if(num_param == 1 && args[0] == "EXIT" )
         return 0;
     else if(num_param == 1 && args[0] == "HELP" )
+    {
         help(); return 1;
+    }
+    else if(num_param == 1 && args[0] == "LIST" )
+    {
+        list_connections();
+        return 1;
+    }
 }
-// ***************************************************************************
 
 void help()
 {
@@ -268,13 +213,21 @@ void help()
     std::cout<<"****************************************************************** "<<std::endl;
 }
 
-// ***************************************************************************************************
-// ***************************************************************************************************
-// ***************************************************************************************************
-// ***************************************************************************************************
-// ***************************************************************************************************
-// ***************************************************************************************************
-// ***************************************************************************************************
+void list_connections()
+{
+    sockaddr_in peeraddr;
+    socklen_t size = sizeof(peeraddr);
+    in_addr inaddr;
+
+    char saddr[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &inaddr, saddr, INET_ADDRSTRLEN);
+
+    std::cout << "inaddr: " << inaddr.s_addr << std::endl;
+    std::cout << "saddr: " << saddr << std::endl;
+
+    for(int i = 0; i < list.client_list.size(); i++)
+        std::cout<<"host: " << list.client_list.at(i) << std::endl;
+}
 
 int start_Server(std::string portNum)
 {
@@ -332,7 +285,7 @@ int server_Accept(int server_sock, std::vector<int> &client_list)
     socklen_t len = sizeof(client);
 
     client_sock = accept(server_sock, (struct sockaddr*)&client, &len);
-    client_list.push_back(client_sock);
+    list.client_list.push_back(client_sock);
 
     char *out;
 
@@ -374,108 +327,4 @@ char* server_Recv(int server)
         fprintf(stderr, "RECV ERROR: %s\n", gai_strerror(status));
     return in;
 }
-
-void *server_Listener(void* td)
-{
-    struct tdata *data;
-
-    data = (struct tdata *) td;
-    data->status = listen(data->server, data->time);
-    //std::cout<<"status: " << data->status << std::endl;
-    //if(data->status < 0)
-    //    fprintf(stderr, "RECV ERROR: %s\n", gai_strerror(data->status));
-    return(NULL);
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/*
- *     // We should wait now for a connection to accept
-    int client_sock, status;
-    struct sockaddr_storage client_addr;
-    socklen_t addr_size;
-    char s[INET6_ADDRSTRLEN]; // an empty string
-
-    // Calculate the size of the data structure
-    addr_size = sizeof client_addr;
-
-    printf("I am now accepting connections ...\n");
-
-    while(1)
-    {
-        // Accept a new connection and return back the socket desciptor
-        client_sock = accept(server_sock, (struct sockaddr *) & client_addr, &addr_size);
-        if(client_sock < 0)
-        {
-            fprintf(stderr,"accept: %s\n",gai_strerror(client_sock));
-            continue;
-        }
-
-        inet_ntop(client_addr.ss_family, get_in_addr((struct sockaddr *) &client_addr),s ,sizeof s);
-        printf("I am now connected to %s \n",s);
-
-
-        char *out = new char[255];
-        try
-        {
-            std::cout<<"SENDING"<<std::endl;
-            memset(&out, 0, sizeof(out));
-            out = "HELLO CLIENT!";
-            status = send(client_sock, out, strlen(out), 0);
-            fprintf(stderr,"SEND ERROR: %s\n",gai_strerror(status));
-            std::cout<<std::endl;
-        }
-        catch(...)
-        {
-            std::cout<<"SEND ERROR: " << status <<std::endl;
-        }
-
-//        char *in = new char[255];
-//        try
-//        {
-//            std::cout<<"RECEIVING"<<std::endl;
-//            memset(&in, 0, sizeof(in));
-//            status = recv(client_sock, in, sizeof(in), 0);
-//            fprintf(stderr,"RECV ERROR: %s\n",gai_strerror(status));
-//            std::cout<<std::endl;
-//            std::cout<<"in: " << in << std::endl;
-//        }
-//        catch(...)
-//        {
-//            std::cout<<"RECV ERROR: " << status <<std::endl;
-//        }
-
-        //if(status == -1)
-        //{
-        //    close(client_sock);
-        //    _exit(4);
-        //}
-
-    }
-*/
 
