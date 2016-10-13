@@ -15,7 +15,7 @@
 #include <net/if.h>
 
 // ****************GLOBAL VARIABLES****************
-struct tdata
+struct tdata //Needs cleaned up.  Some variables no longer needed.
 {
     int thread_id;
     int status;
@@ -32,7 +32,7 @@ struct tdata
     struct addrinfo *serv;
 };
 
-void *get_in_addr(struct sockaddr *sa)
+void *get_in_addr(struct sockaddr *sa)//Copy and paste code from internet.  Will grab link to cite source
 {
     if(sa->sa_family == AF_INET)
         return &(((struct sockaddr_in*)sa)->sin_addr);
@@ -40,8 +40,6 @@ void *get_in_addr(struct sockaddr *sa)
 }
 
 tdata list;
-#define PORT = "5001"
-#define CLIENT_IP = "192.168.1.42"
 int NUM_ARGS = 5;
 
 // ****************SERVER FUNCTIONS****************
@@ -65,7 +63,7 @@ void server_Recv(int server);
 void server_Listener(int td);
 
 // ******************MAIN FUNCTION*****************
-int main(int argc, char *argv[])
+int main(int argc, char *argv[])//Need to update to take port as argument, currently hardcoded.
 {
     std::cout<<std::endl<<std::endl;
     list.thread_id = 1;
@@ -89,6 +87,8 @@ int main(int argc, char *argv[])
     list.connection_waiting = false;
     list.exit_prog = true;
 
+    shutdown(list.server, 2);
+
     return 0;
 }
 
@@ -107,6 +107,9 @@ void my_shell(int td)
         the_args.push_back(input);
         status = ex_args(the_args);
     }
+
+    for(int i = 0; i < list.client_list.size(); i++)//Should write shutdown function to close all connections
+        shutdown(list.client_list[i], 2);
 }
 
 void server_Listener(int td)
@@ -133,13 +136,14 @@ void server_Listener(int td)
 void server_Recv(int server)
 {
     std::cout<<"RECEVING"<<std::endl;
-    char in[255];
-    int status;
+    char in[1024];
+    size_t buff_size = 1024;
+    int status = 0;
 
     while(1)
     {
         memset(&in, 0, sizeof(in));
-        status = recv(server, in, sizeof(in), MSG_DONTWAIT);
+        status = recv(server, in, buff_size, MSG_DONTWAIT);
         if(status < 0)
         {
             fprintf(stderr, "RECV ERROR: %S\n", gai_strerror(status));
@@ -147,12 +151,11 @@ void server_Recv(int server)
         else if(status > 0)
             std::cout<<"data: " << in << std::endl;
         else if(status == 0)
-            std::cout<<"status 0"<<std::endl;
+            break;
     }
 
-    std::cout<<"data: " << in << std::endl;
-    std::cout<<"status: " << status << std::endl;
-
+    //std::cout<<"data: " << in << std::endl;
+    //std::cout<<"status: " << status << std::endl;
 }
 
 // ***************************************************************************
@@ -248,12 +251,13 @@ int ex_args(std::vector<std::string> args)
     }
     else if(num_param > 1 && args[0] == "SEND")
     {
-        std::string msg = "";
+        std::string msg = args[2];
         if(args.size() > 3)
         {
             for(int i = 2; i < args.size(); i++)
             {
                 msg += args[i];
+                msg += " ";
             }
         }
         send_msg(std::stoi(args[1]), msg);
@@ -314,7 +318,7 @@ void list_connections()
     }
 }
 
-void get_myip()
+void get_myip()//This is copy and paste code from net.  Shows ip's for all interfaces on computer
 {
     struct ifaddrs *myaddrs, *ifa;
     void *in_addr;
@@ -517,21 +521,10 @@ int server_Accept(int server_sock, std::vector<int> &client_list)
 
     if (getsockname(client_sock, (struct sockaddr *)&client, &len) == -1)
         std::cout<<"PORT NUMBER ERROR"<<std::endl;
-    else
-        printf("port number %d\n", ntohs(client.sin_port));
-
-    std::cout<<"connection ip: " << ip_string << std::endl;
-    //std::cout<<"connection port: " << port << std::endl;
 
     std::string port = std::to_string(ntohs(client.sin_port));
-    //sprintf(port, "%u", ntohs(client.sin_port));
 
     connect_client(ip_string, port);
-
-    //list.client_list.push_back(client_sock);
-    //list.client_addr.push_back(client);
-    //list.client_list_ad.push_back(ip_string);
-    //list.client_list_port.push_back(ntohs(client.sin_port));
 
     char *out;
 
