@@ -144,10 +144,18 @@ void server_Recv(int server)
         status = recv(server, in, buff_size, MSG_DONTWAIT);
         if(status < 0)
         {
-            //fprintf(stderr, "RECV ERROR: %S\n", gai_strerror(status));
+            fprintf(stderr, "RECV ERROR: %S\n", gai_strerror(status));
         }
         else if(status > 0)
-            std::cout<<"data: " << in << std::endl;
+        {
+            if(in == "_TERMINATE_")
+            {
+                terminate_socket(server);
+                break;
+            }
+            else
+                std::cout<<"data: " << in << std::endl;
+        }
         else if(status == 0)
             break;
     }
@@ -235,6 +243,13 @@ int ex_args(std::vector<std::string> &args)
     }
     else if(num_param > 1 && args[0] == "TERMINATE")
     {
+        int sock = std::stoi(args[1]);
+        std::string term = "_TERMINATE_";
+        std::string msg = "Closing connection with ";
+        msg += list.client_list_ad[sock];
+        send_msg(list.client_list[sock],msg.c_str());
+        send_msg(list.client_list[sock],term.c_str());
+
         terminate_socket(std::stoi(args[1]));
         return 1;
     }
@@ -295,30 +310,17 @@ void help()
 
 void list_connections()
 {
-//    socklen_t len;
-//    struct sockaddr_storage addr;
-//    char ipstr[INET6_ADDRSTRLEN];
-//    int port;
-
-//    len = sizeof addr;
-
-//    for(int i = 0; i < list.client_addr.size(); i++)
-//    {
-//        struct sockaddr_in *s = (struct sockaddr_in *)&list.client_addr.at(i);
-//        port = ntohs(s->sin_port);
-//        inet_ntop(AF_INET, &s->sin_addr, ipstr, sizeof ipstr);
-//        std::cout<<"host: " << list.client_list.at(i);
-//        std::cout<<" - "<< ipstr <<std::endl;
-//        ipstr[0] = '\0';
-//    }
-
     std::cout<<"ID\tIP\t\tPORT"<<std::endl;
 
     for(int i = 0; i < list.client_list.size(); i++)
     {
-        std::cout<<list.client_list[i]<<"\t";
-        std::cout<<list.client_list_ad[i]<<"\t";
-        std::cout<<list.client_list_port[i]<<std::endl;
+        if(list.client_list[i] != -1)
+        {
+            std::cout<<i<<"\t";
+            //std::cout<<list.client_list[i]<<"\t";
+            std::cout<<list.client_list_ad[i]<<"\t";
+            std::cout<<list.client_list_port[i]<<std::endl;
+        }
     }
 }
 
@@ -464,45 +466,31 @@ void connect_client(std::string con_ip, std::string con_port)
 
 void terminate_socket(int sock)
 {
-    //shutdown(sock,SHUT_RDWR);
+    shutdown(list.client_list[sock], SHUT_RDWR);
 
-    for(int i = 0; i < list.client_list.size(); i++)
-    {
-        if(list.client_list[i] == sock)
-        {
-            list.client_list[i] = -1;
-            list.client_list_ad[i] = "";
-            list.client_list_port[i] = "";
-        }
-    }
+    std::cout<<"> Connection with "<< list.client_list_ad[sock] << " has been closed" << std::endl;
+
+    list.client_list[sock] = -1;
+    list.client_list_ad[sock] = "";
+    list.client_list_port[sock] = "";
+
+
 
     //shutdown(sock,2);
 }
 
 void send_msg(int sock, std::string msg)
 {
-    std::cout<<"SENDING"<<std::endl;
+    int send_sock = list.client_list[sock];
     int status;
     const char *out = msg.c_str();
 
-    std::cout<<"out: " << out << std::endl;
-
-    status = send(sock, msg.c_str(), strlen(out), 0);
+    status = send(send_sock, msg.c_str(), strlen(out), 0);
     if(status < 0)
     {
         fprintf(stderr,"> SEND ERROR: %s\n",gai_strerror(status));
         std::cout<<std::endl;
     }
-
-    std::cout<<"send code: " << status << std::endl;
-
-//    int status = send(sock, &msg, std::strlen(msg.c_str()), 0);
-
-//    if(status < 0)
-//    {
-//        fprintf(stderr,"> SEND ERROR: %s\n",gai_strerror(status));
-//        std::cout<<std::endl;
-//    }
 }
 
 
