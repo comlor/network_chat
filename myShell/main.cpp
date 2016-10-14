@@ -14,6 +14,8 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 
+enum MY_ERRORS { CONNECT_FAIL, SEND_FAIL, RECV_FAIL, BIND_FAIL, CLOSE_FAIL, ARG_ERROR };
+
 // ****************GLOBAL VARIABLES****************
 struct tdata //Needs cleaned up.  Some variables no longer needed.
 {
@@ -26,7 +28,7 @@ struct tdata //Needs cleaned up.  Some variables no longer needed.
     bool exit_prog = false;
     std::vector<int> client_list;
     std::vector<std::string> client_list_ad;
-    std::vector<uint16_t> client_list_port;
+    std::vector<std::string> client_list_port;
     std::vector<sockaddr_in> client_addr;
     sockaddr_storage server_sock;
     struct addrinfo *serv;
@@ -44,18 +46,19 @@ int NUM_ARGS = 5;
 
 // ****************SERVER FUNCTIONS****************
 int start_Server(std::string portNum);
-int server_Accept(int server_sock, std::vector<int> &client_list);
+int server_Accept(int server_sock);
 
 // ****************TERMINAL FUNCTIONS****************
 std::string read_input(void);
 std::vector<std::string> parse_input(std::string &in);
-int ex_args(std::vector<std::string> args);
+int ex_args(std::vector<std::__1::string> &args);
 void help();
 void list_connections();
 void get_myip();
 void connect_client(std::__1::string con_ip, std::__1::string con_port);
 void terminate_socket(int sock);
 void send_msg(int sock, std::__1::string msg);
+void error_msg(int err_num);
 
 // ****************THREAD FUNCTIONS****************
 void my_shell(int td);
@@ -66,14 +69,18 @@ void server_Listener(int td);
 int main(int argc, char *argv[])//Need to update to take port as argument, currently hardcoded.
 {
     std::cout<<std::endl<<std::endl;
+    std::string port;
     list.thread_id = 1;
     list.client_list.resize(10);
     list.client_list.clear();
-    //list.client_list_ad.resize(10);
-    //list.client_list_ad.clear();
-    std::string port = "5001";
     list.listen_port = port;
     int istatus = 1;
+
+//    if(argc != 2)
+//        error_msg(ARG_ERROR);
+//    else
+//        port = argv[1];
+    port = "5001";
 
     int server = start_Server(port);
     list.server = server;
@@ -84,10 +91,11 @@ int main(int argc, char *argv[])//Need to update to take port as argument, curre
     server_listen.detach();
 
     terminal.join();
+
     list.connection_waiting = false;
     list.exit_prog = true;
 
-    shutdown(list.server, 2);
+    //shutdown(list.server, 2);
 
     return 0;
 }
@@ -104,12 +112,11 @@ void my_shell(int td)
         std::cout<<"> ";
         input = read_input();
         the_args = parse_input(input);
-        the_args.push_back(input);
         status = ex_args(the_args);
     }
 
-    for(int i = 0; i < list.client_list.size(); i++)//Should write shutdown function to close all connections
-        shutdown(list.client_list[i], 2);
+    //for(int i = 0; i < list.client_list.size(); i++)//Should write shutdown function to close all connections
+    //    shutdown(list.client_list[i], 2);
 }
 
 void server_Listener(int td)
@@ -125,7 +132,7 @@ void server_Listener(int td)
 
         if(list.connection_waiting == true)
         {
-            client_sock = server_Accept(list.server,list.client_list);
+            client_sock = server_Accept(list.server);
             list.connection_waiting = false;
         }
         else if(list.exit_prog == true)
@@ -135,7 +142,6 @@ void server_Listener(int td)
 
 void server_Recv(int server)
 {
-    std::cout<<"RECEVING"<<std::endl;
     char in[1024];
     size_t buff_size = 1024;
     int status = 0;
@@ -182,6 +188,7 @@ std::vector<std::string> parse_input(std::string &in)
     NUM_ARGS = num_param;
     std::vector<std::string> param;
     param.resize(num_param);
+    param.clear();
     int end = 0, index = 0;
 
     for(unsigned int i = 0; i < in.length(); i++)
@@ -191,32 +198,29 @@ std::vector<std::string> parse_input(std::string &in)
         if(end == -1)
         {
             std::string insert = in.substr(i);
-            param[index] = insert;
-            for(unsigned int j = 0; j < param[index].length(); j++)
-                param[index][j] = toupper(param[index][j]);
+            param.push_back(insert);
             break;
         }
         else
         {
             std::string insert = in.substr(i, end - i);
-            param[index] = insert;
-            for(unsigned int j = 0; j < param[index].length(); j++)
-                param[index][j] = toupper(param[index][j]);
+            param.push_back(insert);
         }
-
-        i = end;
         index++;
+        i = end;
     }
+
+    int first = 0;
+    for(unsigned int j = 0; j < param[first].length(); j++)
+        param[first][j] = toupper(param[first][j]);
+
     return param;
 }
 
 // ****************************Execute Parameters*****************************
-int ex_args(std::vector<std::string> args)
+int ex_args(std::vector<std::string> &args)
 {
     int num_param = NUM_ARGS;
-
-    for(int i = 0; i < num_param; i++)
-        std::cout<<"param check: " << args[i] << std::endl;
 
     if(num_param == 1 && args[0] == "EXIT" )
         return 0;
@@ -251,8 +255,9 @@ int ex_args(std::vector<std::string> args)
     }
     else if(num_param > 1 && args[0] == "SEND")
     {
-        std::string msg = args[2];
-        if(args.size() > 3)
+        std::string msg;
+        msg.clear();
+        if(args.size() > 2)
         {
             for(int i = 2; i < args.size(); i++)
             {
@@ -291,23 +296,6 @@ void help()
 
 void list_connections()
 {
-//    socklen_t len;
-//    struct sockaddr_storage addr;
-//    char ipstr[INET6_ADDRSTRLEN];
-//    int port;
-
-//    len = sizeof addr;
-
-//    for(int i = 0; i < list.client_addr.size(); i++)
-//    {
-//        struct sockaddr_in *s = (struct sockaddr_in *)&list.client_addr.at(i);
-//        port = ntohs(s->sin_port);
-//        inet_ntop(AF_INET, &s->sin_addr, ipstr, sizeof ipstr);
-//        std::cout<<"host: " << list.client_list.at(i);
-//        std::cout<<" - "<< ipstr <<std::endl;
-//        ipstr[0] = '\0';
-//    }
-
     std::cout<<"ID\tIP\t\tPORT"<<std::endl;
 
     for(int i = 0; i < list.client_list.size(); i++)
@@ -367,47 +355,43 @@ void get_myip()//This is copy and paste code from net.  Shows ip's for all inter
         }
     }
 
-    freeifaddrs(myaddrs);
+    //freeifaddrs(myaddrs);
 }
 
 void connect_client(std::string con_ip, std::string con_port)
 {
-    int sock, status;
-    struct addrinfo *servinfo, tcp_info;
+    int sockfd = 0;
+    struct sockaddr_in client_info;
 
-    const char *conip = con_ip.c_str();
-    const char *conport = con_port.c_str();
+    client_info.sin_family = AF_INET;
+    client_info.sin_port = htons(5001);
 
-    memset(&tcp_info, 0, sizeof(tcp_info));
-    tcp_info.ai_family = AF_INET;
-    tcp_info.ai_socktype = SOCK_STREAM;
-    tcp_info.ai_flags = AI_PASSIVE;
-
-    if((status = getaddrinfo(conip, conport, &tcp_info, &servinfo)) != 0)
+    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
-        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+        printf("\n Error : Could not create socket \n");
         exit(1);
     }
 
-    sock = socket(servinfo->ai_family, servinfo->ai_socktype, servinfo->ai_protocol);
-    if(sock < 0)
+    if(inet_pton(AF_INET, con_ip.c_str(), &client_info.sin_addr)<=0)
     {
-        printf("\nServer socket failure %m", sock);
+        printf("\n inet_pton error occured\n");
         exit(1);
     }
 
-    if(connect(sock, servinfo->ai_addr, servinfo->ai_addrlen) < 0)
+    if( connect(sockfd, (struct sockaddr *)&client_info, sizeof(client_info)) < 0)
     {
-        printf("\nClient connection failure %m", sock);
-        exit(1);
+       printf("\n Error : Connect Failed \n");
+       exit(1);
     }
-    uint16_t p = std::stoi(conport);
+
     std::cout<<"\nSuccessful Connection!\n";
-    list.client_list.push_back(sock);
-    list.client_list_ad.push_back(conip);
-    list.client_list_port.push_back(p);
 
-    std::thread receive_func(server_Recv, sock);
+    //Add Client to list of connected TCP Sockets
+    list.client_list.push_back(sockfd);
+    list.client_list_ad.push_back(con_ip);
+    list.client_list_port.push_back(con_port);
+
+    std::thread receive_func(server_Recv, sockfd);
 
     while(!receive_func.joinable()){}
     receive_func.detach();
@@ -415,7 +399,7 @@ void connect_client(std::string con_ip, std::string con_port)
 
 void terminate_socket(int sock)
 {
-    shutdown(sock,SHUT_RDWR);
+    //shutdown(sock,SHUT_RDWR);
 
     for(int i = 0; i < list.client_list.size(); i++)
     {
@@ -423,20 +407,17 @@ void terminate_socket(int sock)
         {
             list.client_list[i] = -1;
             list.client_list_ad[i] = "";
-            list.client_list_port[i] = 0;
+            list.client_list_port[i] = "";
         }
     }
 
-    shutdown(sock,2);
+    //shutdown(sock,2);
 }
 
 void send_msg(int sock, std::string msg)
 {
-    int client_sock, status;
-
-    char *out = (char*)malloc(255 * sizeof(char));
-    memset(&out, 0, sizeof(out));
-    out = "Hello!";
+    int status;
+    const char *out = msg.c_str();
 
     status = send(sock, msg.c_str(), strlen(out), 0);
     if(status < 0)
@@ -444,14 +425,6 @@ void send_msg(int sock, std::string msg)
         fprintf(stderr,"> SEND ERROR: %s\n",gai_strerror(status));
         std::cout<<std::endl;
     }
-
-//    int status = send(sock, &msg, std::strlen(msg.c_str()), 0);
-
-//    if(status < 0)
-//    {
-//        fprintf(stderr,"> SEND ERROR: %s\n",gai_strerror(status));
-//        std::cout<<std::endl;
-//    }
 }
 
 
@@ -502,13 +475,14 @@ int start_Server(std::string portNum)
         exit(EXIT_FAILURE);
     }
 
+    list.server = server_sock;
     list.serv = servinfo;
     //freeaddrinfo(servinfo);           /* No longer needed */
 
     return server_sock;
 }
 
-int server_Accept(int server_sock, std::vector<int> &client_list)
+int server_Accept(int server_sock)
 {
     struct sockaddr_in client;
     int client_sock, status;
@@ -524,12 +498,16 @@ int server_Accept(int server_sock, std::vector<int> &client_list)
 
     std::string port = std::to_string(ntohs(client.sin_port));
 
-    connect_client(ip_string, port);
+    list.client_list.push_back(client_sock);
+    list.client_list_ad.push_back(ip_string);
+    list.client_list_port.push_back(port);
+    std::cout<<"port: " << port << std::endl;
+    std::cout<<"ip: " << ip_string << std::endl;
 
     char *out;
 
     memset(&out, 0, sizeof(out));
-    out = "This is a chat app!";
+    out = "Welcome to the Chat!";
     status = send(client_sock, &*out, strlen(out), 0);
     if(status < 0)
     {
@@ -537,6 +515,24 @@ int server_Accept(int server_sock, std::vector<int> &client_list)
         std::cout<<std::endl;
     }
 
+    std::thread receive_func(server_Recv, client_sock);
+
+    while(!receive_func.joinable()){}
+    receive_func.detach();
+
     return 1;
+}
+
+void error_msg(int err_num)
+{
+    switch(err_num)
+    {
+    case ARG_ERROR:
+        std::cout<<"Invalid Parameters: chat <port>"<<std::endl;
+        break;
+    default:
+        std::cout<<"Unknown Error Occured"<<std::endl;
+        break;
+    }
 }
 
