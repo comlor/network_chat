@@ -144,7 +144,7 @@ void server_Recv(int server)
         status = recv(server, in, buff_size, MSG_DONTWAIT);
         if(status < 0)
         {
-            fprintf(stderr, "RECV ERROR: %S\n", gai_strerror(status));
+            //fprintf(stderr, "RECV ERROR: %S\n", gai_strerror(status));
         }
         else if(status > 0)
         {
