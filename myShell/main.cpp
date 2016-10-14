@@ -2,7 +2,6 @@
 #include <vector>
 #include <thread>
 #include <cstring>
-
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -15,7 +14,7 @@
 #include <ifaddrs.h>
 #include <net/if.h>
 
-enum MY_ERRORS { CONNECT_FAIL, SEND_FAIL, RECV_FAIL, BIND_FAIL, CLOSE_FAIL, ARG_ERROR, PORT_FAIL, SOCKET_FAIL };
+enum MY_ERRORS { CONNECT_FAIL, SEND_FAIL, RECV_FAIL, BIND_FAIL, CLOSE_FAIL };
 
 // ****************GLOBAL VARIABLES****************
 struct tdata //Needs cleaned up.  Some variables no longer needed.
@@ -33,7 +32,6 @@ struct tdata //Needs cleaned up.  Some variables no longer needed.
     std::vector<sockaddr_in> client_addr;
     sockaddr_storage server_sock;
     struct addrinfo *serv;
-    int error;
 };
 
 void *get_in_addr(struct sockaddr *sa)//Copy and paste code from internet.  Will grab link to cite source
@@ -48,7 +46,7 @@ int NUM_ARGS = 5;
 
 // ****************SERVER FUNCTIONS****************
 int start_Server(std::string portNum);
-int server_Accept(int server_sock);
+int server_Accept(int server_sock, std::vector<int> &client_list);
 
 // ****************TERMINAL FUNCTIONS****************
 std::string read_input(void);
@@ -57,11 +55,9 @@ int ex_args(std::vector<std::string> &args);
 void help();
 void list_connections();
 void get_myip();
-void myPort();
 void connect_client(std::string con_ip, std::string con_port);
 void terminate_socket(int sock);
 void send_msg(int sock, std::string msg);
-void error_msg(int err_num);
 
 // ****************THREAD FUNCTIONS****************
 void my_shell(int td);
@@ -72,22 +68,17 @@ void server_Listener(int td);
 int main(int argc, char *argv[])//Need to update to take port as argument, currently hardcoded.
 {
     std::cout<<std::endl<<std::endl;
-    std::string port;
     list.thread_id = 1;
     list.client_list.resize(10);
     list.client_list.clear();
+    //list.client_list_ad.resize(10);
+    //list.client_list_ad.clear();
+    std::string port = "5001";
     list.listen_port = port;
     int istatus = 1;
 
-//    if(argc != 2)
-//        error_msg(ARG_ERROR);
-//    else
-//        port = argv[1];
-    port = "5001";
-
     int server = start_Server(port);
     list.server = server;
-    list.listen_port = port;
 
     std::thread terminal(my_shell,istatus);
 
@@ -95,7 +86,6 @@ int main(int argc, char *argv[])//Need to update to take port as argument, curre
     server_listen.detach();
 
     terminal.join();
-
     list.connection_waiting = false;
     list.exit_prog = true;
 
@@ -113,21 +103,10 @@ void my_shell(int td)
 
     while(status)
     {
-        try
-        {
-            std::cout<<"> ";
-            input = read_input();
-            the_args = parse_input(input);
-            status = ex_args(the_args);
-        }
-        catch(MY_ERRORS e)
-        {
-            error_msg(e);
-        }
-        catch(...)
-        {
-            std::cout<<"UNKNOWN ERROR"<<std::endl;
-        }
+        std::cout<<"> ";
+        input = read_input();
+        the_args = parse_input(input);
+        status = ex_args(the_args);
     }
 
     //for(int i = 0; i < list.client_list.size(); i++)//Should write shutdown function to close all connections
@@ -147,7 +126,7 @@ void server_Listener(int td)
 
         if(list.connection_waiting == true)
         {
-            client_sock = server_Accept(list.server);
+            client_sock = server_Accept(list.server,list.client_list);
             list.connection_waiting = false;
         }
         else if(list.exit_prog == true)
@@ -157,6 +136,7 @@ void server_Listener(int td)
 
 void server_Recv(int server)
 {
+    std::cout<<"RECEVING"<<std::endl;
     char in[1024];
     size_t buff_size = 1024;
     int status = 0;
@@ -167,8 +147,7 @@ void server_Recv(int server)
         status = recv(server, in, buff_size, MSG_DONTWAIT);
         if(status < 0)
         {
-            list.error = status;
-            throw RECV_FAIL;
+            //fprintf(stderr, "RECV ERROR: %S\n", gai_strerror(status));
         }
         else if(status > 0)
             std::cout<<"data: " << in << std::endl;
@@ -210,6 +189,7 @@ std::vector<std::string> parse_input(std::string &in)
     for(unsigned int i = 0; i < in.length(); i++)
     {
         end = in.find_first_of(' ', i);
+        std::cout<<"end: " << end << std::endl;
 
         if(end == -1)
         {
@@ -256,7 +236,7 @@ int ex_args(std::vector<std::string> &args)
     }
     else if(num_param == 1 && args[0] == "MYPORT")
     {
-        myPort();
+        std::cout<<"> Listening Port: " << list.listen_port << std::endl;
         return 1;
     }
     else if(num_param > 1 && args[0] == "TERMINATE")
@@ -312,12 +292,28 @@ void help()
 
 void list_connections()
 {
+//    socklen_t len;
+//    struct sockaddr_storage addr;
+//    char ipstr[INET6_ADDRSTRLEN];
+//    int port;
+
+//    len = sizeof addr;
+
+//    for(int i = 0; i < list.client_addr.size(); i++)
+//    {
+//        struct sockaddr_in *s = (struct sockaddr_in *)&list.client_addr.at(i);
+//        port = ntohs(s->sin_port);
+//        inet_ntop(AF_INET, &s->sin_addr, ipstr, sizeof ipstr);
+//        std::cout<<"host: " << list.client_list.at(i);
+//        std::cout<<" - "<< ipstr <<std::endl;
+//        ipstr[0] = '\0';
+//    }
+
     std::cout<<"ID\tIP\t\tPORT"<<std::endl;
 
     for(int i = 0; i < list.client_list.size(); i++)
     {
-        std::cout<<i<<"\t";
-        //std::cout<<list.client_list[i]<<"\t";
+        std::cout<<list.client_list[i]<<"\t";
         std::cout<<list.client_list_ad[i]<<"\t";
         std::cout<<list.client_list_port[i]<<std::endl;
     }
@@ -375,21 +371,21 @@ void get_myip()//This is copy and paste code from net.  Shows ip's for all inter
     //freeifaddrs(myaddrs);
 }
 
-void myPort()
-{
-    printf("My port number is %s\n", list.listen_port.c_str());
-}
-
 void connect_client(std::string con_ip, std::string con_port)
 {
     int sockfd = 0;
     struct sockaddr_in client_info;
 
     client_info.sin_family = AF_INET;
-    client_info.sin_port = htons(5001);//This needs updated for passed parameter.
+    client_info.sin_port = htons(5001);
 
     if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-        throw SOCKET_FAIL;
+    {
+        printf("\n Error : Could not create socket \n");
+        exit(1);
+    }
+
+
 
     if(inet_pton(AF_INET, con_ip.c_str(), &client_info.sin_addr)<=0)
     {
@@ -398,8 +394,58 @@ void connect_client(std::string con_ip, std::string con_port)
     }
 
     if( connect(sockfd, (struct sockaddr *)&client_info, sizeof(client_info)) < 0)
-        throw CONNECT_FAIL;
+    {
+       printf("\n Error : Connect Failed \n");
+       exit(1);
+    }
 
+
+
+//    int sock, status;
+//    struct addrinfo *clientInfo, tcp_info;
+//    struct sockaddr_in *clientADDR;
+
+//    const char *conip = con_ip.c_str();
+//    const char *conport = con_port.c_str();
+
+//    memset(&tcp_info, 0, sizeof(tcp_info));
+//    tcp_info.ai_family = AF_INET;
+//    tcp_info.ai_socktype = SOCK_STREAM;
+//    tcp_info.ai_flags = AI_PASSIVE;
+
+//    clientADDR->sin_family = AF_INET;
+//    clientADDR->sin_port = htons(std::stoi(con_port));
+
+//    if(inet_pton(AF_INET, con_ip.c_str(), &clientADDR->sin_addr)<=0)
+//    {
+//        printf("\n inet_pton error occured\n");
+//        exit(1);
+//    }
+
+//    if((status = getaddrinfo(conip, conport, &tcp_info, &clientInfo)) != 0)
+//    {
+//        fprintf(stderr, "getaddrinfo error: %s\n", gai_strerror(status));
+//        exit(1);
+//    }
+
+//    sock = socket(AF_INET, SOCK_STREAM, 0);
+//    if(sock < 0)
+//    {
+//        printf("\nServer socket failure %m", sock);
+//        exit(1);
+//    }
+//    else
+//    {
+//        std::cout<<"sock: "<<sock<<std::endl;
+//    }
+
+//    if(connect(sock, (struct sockaddr *)&clientADDR, sizeof(clientADDR)) < 0)
+//    {
+//        printf("\nClient connection failure %m", sock);
+//        exit(1);
+//    }
+
+    //uint16_t p = std::stoi(conport);
     std::cout<<"\nSuccessful Connection!\n";
 
     //Add Client to list of connected TCP Sockets
@@ -413,7 +459,7 @@ void connect_client(std::string con_ip, std::string con_port)
     receive_func.detach();
 }
 
-void terminate_socket(int sock)//Need to update this and test
+void terminate_socket(int sock)
 {
     //shutdown(sock,SHUT_RDWR);
 
@@ -432,12 +478,28 @@ void terminate_socket(int sock)//Need to update this and test
 
 void send_msg(int sock, std::string msg)
 {
+    std::cout<<"SENDING"<<std::endl;
     int status;
     const char *out = msg.c_str();
 
-    status = send(list.client_list[sock], msg.c_str(), strlen(out), 0);
+    std::cout<<"out: " << out << std::endl;
+
+    status = send(sock, msg.c_str(), strlen(out), 0);
     if(status < 0)
-        throw SEND_FAIL;
+    {
+        fprintf(stderr,"> SEND ERROR: %s\n",gai_strerror(status));
+        std::cout<<std::endl;
+    }
+
+    std::cout<<"send code: " << status << std::endl;
+
+//    int status = send(sock, &msg, std::strlen(msg.c_str()), 0);
+
+//    if(status < 0)
+//    {
+//        fprintf(stderr,"> SEND ERROR: %s\n",gai_strerror(status));
+//        std::cout<<std::endl;
+//    }
 }
 
 
@@ -474,20 +536,28 @@ int start_Server(std::string portNum)
         if (server_sock == -1)
             continue;
 
+
         if (bind(server_sock, p->ai_addr, p->ai_addrlen) == 0)
-            break;
+        {
+            break;                  /* Success */
+        }
+
+        //close(server_sock);
     }
 
-    if (p == NULL)
-        throw BIND_FAIL;
+    if (p == NULL) {               /* No address succeeded */
+        fprintf(stderr, "Could not bind\n");
+        exit(EXIT_FAILURE);
+    }
 
     list.server = server_sock;
     list.serv = servinfo;
+    //freeaddrinfo(servinfo);           /* No longer needed */
 
     return server_sock;
 }
 
-int server_Accept(int server_sock)
+int server_Accept(int server_sock, std::vector<int> &client_list)
 {
     struct sockaddr_in client;
     int client_sock, status;
@@ -499,23 +569,25 @@ int server_Accept(int server_sock)
     inet_ntop(AF_INET, (struct sockaddr_in *)&client.sin_addr, ip_string, sizeof ip_string);
 
     if (getsockname(client_sock, (struct sockaddr *)&client, &len) == -1)
-        throw PORT_FAIL;
+        std::cout<<"PORT NUMBER ERROR"<<std::endl;
 
     std::string port = std::to_string(ntohs(client.sin_port));
 
     list.client_list.push_back(client_sock);
     list.client_list_ad.push_back(ip_string);
     list.client_list_port.push_back(port);
+    std::cout<<"port: " << port << std::endl;
+    std::cout<<"ip: " << ip_string << std::endl;
 
     char *out;
 
     memset(&out, 0, sizeof(out));
-    out = "Welcome to the Chat!";
+    out = "This is a chat app!";
     status = send(client_sock, &*out, strlen(out), 0);
     if(status < 0)
     {
-        list.error = status;
-        throw SEND_FAIL;
+        fprintf(stderr,"> SEND ERROR: %s\n",gai_strerror(status));
+        std::cout<<std::endl;
     }
 
     std::thread receive_func(server_Recv, client_sock);
@@ -524,36 +596,5 @@ int server_Accept(int server_sock)
     receive_func.detach();
 
     return 1;
-}
-
-void error_msg(int err_num)
-{
-    switch(err_num)
-    {
-    case ARG_ERROR:
-        std::cout<<"Invalid Parameters: chat <port>"<<std::endl;
-        break;
-    case SEND_FAIL:
-        fprintf(stderr,"> SEND ERROR: %s\n",gai_strerror(list.error));
-        break;
-    case RECV_FAIL:
-        fprintf(stderr, "RECV ERROR: %S\n", gai_strerror(list.error));
-        break;
-    case PORT_FAIL:
-        std::cout<<"> Invalid Port Number"<<std::endl;
-        break;
-    case BIND_FAIL:
-        fprintf(stderr, "> Could not bind &s\n", gai_strerror(list.error));
-        break;
-    case CONNECT_FAIL:
-        std::cout<<"Failed to connect to client.  Please try again."<<std::endl;
-        break;
-    case SOCKET_FAIL:
-        std::cout<<"Failed to create socket"<<std::endl;
-        break;
-    default:
-        std::cout<<"Unknown Error Occured"<<std::endl;
-        break;
-    }
 }
 
