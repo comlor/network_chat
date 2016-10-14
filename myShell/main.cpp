@@ -71,8 +71,6 @@ int main(int argc, char *argv[])//Need to update to take port as argument, curre
     list.thread_id = 1;
     list.client_list.resize(10);
     list.client_list.clear();
-    //list.client_list_ad.resize(10);
-    //list.client_list_ad.clear();
     std::string port = "5001";
     list.listen_port = port;
     int istatus = 1;
@@ -136,7 +134,6 @@ void server_Listener(int td)
 
 void server_Recv(int server)
 {
-    std::cout<<"RECEVING"<<std::endl;
     char in[1024];
     size_t buff_size = 1024;
     int status = 0;
@@ -154,9 +151,6 @@ void server_Recv(int server)
         else if(status == 0)
             break;
     }
-
-    //std::cout<<"data: " << in << std::endl;
-    //std::cout<<"status: " << status << std::endl;
 }
 
 // ***************************************************************************
@@ -246,22 +240,31 @@ int ex_args(std::vector<std::string> &args)
     }
     else if(num_param > 1 && args[0] == "CONNECT")
     {
-        connect_client(args[1], args[2]);
+        if(num_param < 3)
+            std::cout<<"Invalid Command format, type help for details"<<std::endl;
+        else
+            connect_client(args[1], args[2]);
         return 1;
     }
     else if(num_param > 1 && args[0] == "SEND")
     {
-        std::string msg;
-        msg.clear();
-        if(args.size() > 2)
+        if(num_param < 3)
+            std::cout<<"Invalid Command format, type help for details"<<std::endl;
+        else
         {
-            for(int i = 2; i < args.size(); i++)
+            std::string msg;
+            msg.clear();
+            if(args.size() > 2)
             {
-                msg += args[i];
-                msg += " ";
+                for(int i = 2; i < args.size(); i++)
+                {
+                    msg += args[i];
+                    msg += " ";
+                }
             }
+            send_msg(std::stoi(args[1]), msg);
         }
-        send_msg(std::stoi(args[1]), msg);
+
         return 1;
     }
 }
