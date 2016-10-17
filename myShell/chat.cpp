@@ -1,5 +1,5 @@
-// Resources used to create this program
-// http://code.runnable.com/VXjZZimG7Nk0smWF/simple-tcp-server-code-for-c%2B%2B-and-socket
+// 1. Resources used to create this program
+// 2. http://code.runnable.com/VXjZZimG7Nk0smWF/simple-tcp-server-code-for-c%2B%2B-and-socket
 // http://man7.org/linux/man-pages/man3/getifaddrs.3.html
 // http://man7.org/linux/man-pages/man3/inet_ntop.3.html
 // http://man7.org/linux/man-pages/man2/socket.2.html
