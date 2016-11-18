@@ -169,7 +169,7 @@ int main(int argc, char *argv[])//Need to update to take port as argument, curre
     std::thread server_listen(server_Listener, istatus); // Starts thread to listen for connections
     server_listen.detach(); // Detach listening thread so it will run on it's own
 
-    sleep(5);
+    sleep(10);
     connectNeighbors();
 
     sleep(5);
