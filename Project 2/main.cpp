@@ -13,7 +13,9 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <climits>
 #include <thread>
+#include <chrono>
 #include <cstring>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -47,7 +49,7 @@ struct neighbor_info // A record for the routing table
 struct route_table
 {
     bool send_update = false; //Time to send an update
-    int update_interval = 30000; //Sets default update interval to 30 seconds -> 30,000 milliseconds
+    int update_interval = 30; //Sets default update interval to 30 seconds -> 30,000 milliseconds
     int num_servers; // Number of servers in table
     int num_neighbors; // Number of neighbors this server has
     std::vector<server_info> server_list; // list of server ids, ipaddresses, and port numbers
@@ -87,7 +89,9 @@ void resetPacketCount();
 void disable(int server_id);
 void crash();
 int getServerInfo();
+int getServerbyIP(std::string ip);
 bool isNeighbor(int id);
+int min(int v1, int v2);
 server_info getNeighborInfo(int neighbor_id);
 std::string create_packet(int num_fields, int serv_port, std::string serv_ip, route_table the_routes);
 
@@ -102,11 +106,13 @@ void connect_client(std::string con_ip, std::string con_port);
 void terminate_socket(int sock);
 void send_msg(int sock, std::string msg);
 void list_connections();
+void updateNeighbors();
 
 // ****************THREAD FUNCTIONS****************
 void my_shell(int status);
 void server_Recv(int server);
 void server_Listener(int status);
+void sendSchedule(int time);
 
 // ******************MAIN FUNCTION*****************
 int main(int argc, char *argv[])//Need to update to take port as argument, currently hardcoded.
@@ -166,6 +172,10 @@ int main(int argc, char *argv[])//Need to update to take port as argument, curre
 
     sleep(5);
     connectNeighbors();
+
+    sleep(5);
+    std::thread auto_update(sendSchedule, my_table.update_interval);
+    auto_update.detach();
 
     terminal.join(); // Wait for terminal thread to exit.  This happens when user types exit command
     list.connection_waiting = false; // After terminal thread exits, sets flags to force receive and
@@ -237,6 +247,10 @@ void server_Recv(int server)
         if(status < 0){} // Error occured, which is expected since nonblocking mode for recv
         else if(status > 0)// Data received
         {
+            std::string msg = in;
+            std::string command = msg.substr(0,msg.find_first_of(","));
+            std::string the_msg = msg.substr(msg.find_first_of(","));
+
             if(strcmp(in,"_TERMINATE_") == 0) // Received termination of socket flag
             {
                 int i = 0;
@@ -249,20 +263,84 @@ void server_Recv(int server)
                 list.client_list_port[i] = "";
                 break;
             }
-            else
+            else if(strcmp(command.c_str(),"_CRASH_") == 0)
             {
-                // Display message details from sending client.
+                std::string param = msg.substr(msg.find_first_of(","));
+                int serv_id = std::atoi(param.c_str());
+                updateCost(list.my_server_id,serv_id,INT_MAX);
+
+                int i = 0;
+                for(i = 0; i < list.client_list.size(); i++) // Find index of socket in list
+                    if(list.client_list[i] == server)        // to display closed message.
+                        break;
+                std::cout<<"> Connection "<<i<<" closed by "<<list.client_list_ad[i]<<std::endl;
+                list.client_list[i] = -1; // Erase connection from connection list.
+                list.client_list_ad[i] = "";
+                list.client_list_port[i] = "";
+                break;
+            }
+            else if(strcmp(command.c_str(), "_MESSAGE_") == 0)
+            {
+                //Display message details from sending client.
                 int i = 0;
                 for(i = 0; i < list.client_list.size(); i++)
                     if(list.client_list[i] == server)
                         break;
                 std::cout<<"> Message received from "<< list.client_list_ad[i] << std::endl;
                 std::cout<<"> Sender's Port: " << list.client_list_port[i] << std::endl;
-                std::cout<<"> Message: " << in << std::endl;
+                std::cout<<"> Message: " << the_msg << std::endl;
+            }
+            else
+            {
+                the_msg = the_msg.substr(1);
+                std::vector<std::string> msg_list;
+                msg_list.resize(10);
+                msg_list.clear();
+                int end = 0, index = 0;
+
+                for(unsigned int i = 0; i < the_msg.length(); i++)
+                {
+                    end = the_msg.find_first_of(',', i);
+
+                    if(end == -1)
+                    {
+                        std::string insert = the_msg.substr(i);
+                        msg_list.push_back(insert);
+                        break;
+                    }
+                    else
+                    {
+                        std::string insert = the_msg.substr(i, end - i);
+                        msg_list.push_back(insert);
+                    }
+                    index++;
+                    i = end;
+                }
+
+                for(unsigned int i = 0; i < msg_list.size(); i++)
+                    std::cout<<i << ": " << msg_list[i] << std::endl;
+
+                for(unsigned int i = 4; i < msg_list.size(); i += 4)
+                {
+                    std::cout<<"S1: " << msg_list[i-2] << ", S2: " << msg_list[i] << ", COST: " << msg_list[i+1] << std::endl;
+                    updateCost(getServerbyIP(msg_list[i-2]),std::atoi(msg_list[i].c_str()),std::atoi(msg_list[i+1].c_str()));
+                }
+                list.packet_count += 1;
             }
         }
         else if(status == 0) // Exit receive thread when connection is close
             break;
+    }
+}
+
+void sendSchedule(int time)
+{
+    while(!list.exit_prog)
+    {
+        std::this_thread::sleep_for(std::chrono::seconds(time));
+
+        if(!list.exit_prog)
+            updateNeighbors();
     }
 }
 
@@ -353,14 +431,7 @@ int ex_args(std::vector<std::string> &args)
     }
     else if(num_param == 1 && args[0] == "STEP")
     {
-        std::string update = create_packet(my_table.num_neighbors,std::atoi(list.listen_port.c_str()),get_myip(),my_table);
-        std::cout<<"Message: " << update << std::endl;
-        for(unsigned int i = 0; i < my_table.num_servers; i++)
-        {
-            server_info this_server = my_table.server_list[i];
-            if(isNeighbor(this_server.server_id))
-                send_msg(this_server.server_id,update);
-        }
+        updateNeighbors();
         return 1;
     }
     else if(num_param == 1 && args[0] == "PACKETS")
@@ -378,7 +449,9 @@ int ex_args(std::vector<std::string> &args)
     else if(num_param > 1 && args[0] == "DISABLE")
     {
         if(isNeighbor(std::atoi(args[1].c_str())))
+        {   //Need to get socket FD from the neighbor_id number
             terminate_socket(std::atoi(args[1].c_str()));
+        }
         return 1;
     }
     else if(num_param > 1 && args[0] == "TERMINATE") // Terminate a connection
@@ -406,7 +479,7 @@ int ex_args(std::vector<std::string> &args)
             std::cout<<"> Invalid Command format, type help for details"<<std::endl;
         else
         {
-            std::string msg;
+            std::string msg = "_MESSAGE_,";
             msg.clear();
             if(args.size() > 2)
             {
@@ -582,7 +655,7 @@ void updateCost(int server_id, int neighbor_id, int new_cost)
             std::cout<<"SERVER AND NEIGHBOR PAIR FOUND.  UPDATE THE COST IN THE TABLE"<<std::endl;
             neighbor_info update;
             update = my_table.neighbor_list[n_index];
-            update.link_cost = new_cost;
+            update.link_cost = min(update.link_cost,new_cost);
             my_table.neighbor_list[n_index] = update;
         }
     }
@@ -605,7 +678,9 @@ void crash()
         neighbor_info my_list = my_table.neighbor_list[i];
         if(my_list.serv_id == list.my_server_id)
         {
-            send_msg(my_list.neighbor_id,"CRASH");
+            std::string msg = "_CRASH_,";
+            msg += std::to_string(list.my_server_id);
+            send_msg(my_list.neighbor_id,msg);
             terminate_socket(my_list.neighbor_id);
         }
     }
@@ -696,10 +771,31 @@ void terminate_socket(int sock)
     }
 }
 
-// **Sends message to client -- takes index(id) from list function and string message to send
+// **Sends message to client -- takes server_id number from server_list
 void send_msg(int sock, std::string msg)
-{
-    int send_sock = list.client_list[sock]; // Gets file descriptor for socket
+{ // sock is the server_id number
+    std::cout<<"sock param: " << sock << std::endl;
+    int sock_fd;
+    server_info the_server;
+
+    for(unsigned int i = 0; i < my_table.num_servers; i++)
+    {
+        the_server = my_table.server_list[i];
+        if(the_server.server_id == sock)
+            break;
+    }
+
+    for(unsigned int i = 0; i < list.client_list.size(); i++)
+    {
+        if(strcmp(the_server.server_ipaddr.c_str(), list.client_list_ad[i].c_str()) == 0)
+        {
+            sock_fd = i;
+            break;
+        }
+    }
+
+    int send_sock = list.client_list[sock_fd]; // Gets file descriptor for socket
+    std::cout<<"send_sock -> " << send_sock << std::endl;
     int status;
     const char *out = msg.c_str(); // Sets message for packet
 
@@ -712,6 +808,17 @@ void send_msg(int sock, std::string msg)
     }
 }
 
+void updateNeighbors()
+{
+    std::string update = create_packet(my_table.num_neighbors,std::atoi(list.listen_port.c_str()),get_myip(),my_table);
+    std::cout<<"Message: " << update << std::endl;
+    for(unsigned int i = 0; i < my_table.num_servers; i++)
+    {
+        server_info this_server = my_table.server_list[i];
+        if(isNeighbor(this_server.server_id) && this_server.server_id != list.my_server_id)
+            send_msg(this_server.server_id,update);
+    }
+}
 
 // ***************************************************************************
 // ******************************Server Functions*****************************
@@ -868,29 +975,17 @@ std::string create_packet(int num_fields, int serv_port, std::string serv_ip, ro
     for(unsigned int i = 0; i < the_routes.num_neighbors; i++)
     {
         neighbor_info neighbors = the_routes.neighbor_list[i];
-        server_info servers = getNeighborInfo(neighbors.neighbor_id);
+        server_info servers = getNeighborInfo(neighbors.serv_id);
 
         message += ",";
         message += servers.server_ipaddr;
         message += ",";
         message += std::to_string(servers.server_port);
         message += ",";
-        message += std::to_string(servers.server_id);
+        message += std::to_string(neighbors.neighbor_id);
         message += ",";
         message += std::to_string(neighbors.link_cost);
     }
-
-//    if(update[0])
-//    {
-//        message += ",";
-//        message += the_routes.server_list[0].server_ipaddr;
-//        message += ",";
-//        message += std::to_string(the_routes.server_list[0].server_port);
-//        message += ",";
-//        message += std::to_string(the_routes.server_list[0].server_id);
-//        message += ",";
-//        message += std::to_string(the_routes.neighbor_list[0].link_cost);
-//    }
 
     return message;
 }
@@ -898,14 +993,11 @@ std::string create_packet(int num_fields, int serv_port, std::string serv_ip, ro
 int getServerInfo()
 {
     std::string my_ip = get_myip();
-    std::cout<<"my_ip func: " << my_ip << std::endl;
     int index = -1;
 
     for(unsigned int i = 0; i < my_table.num_servers; i++)
     {
         server_info the_server = my_table.server_list[i];
-        std::cout<<"ip_table: " << the_server.server_ipaddr << std::endl;
-        std::cout<<"port_table: " << the_server.server_port << std::endl;
         if(my_ip.compare(the_server.server_ipaddr) == 0)
         {
             index = i;
@@ -942,4 +1034,21 @@ server_info getNeighborInfo(int neighbor_id)
         }
     }
     return the_server;
+}
+
+int getServerbyIP(std::string ip)
+{
+    int id;
+    for(unsigned int i = 0; i < my_table.num_servers; i++)
+    {
+        server_info temp = my_table.server_list[i];
+        if(strcmp(ip.c_str(), temp.server_ipaddr.c_str()) == 0)
+            id = temp.server_id;
+    }
+    return id;
+}
+
+int min(int v1, int v2)
+{
+    return (v1 < v2) ? v1 : v2;
 }
