@@ -91,7 +91,6 @@ void crash();
 int getServerInfo();
 int getServerbyIP(std::string ip);
 bool isNeighbor(int id);
-int min(int v1, int v2);
 server_info getNeighborInfo(int neighbor_id);
 std::string create_packet(int num_fields, int serv_port, std::string serv_ip, route_table the_routes);
 
@@ -655,7 +654,7 @@ void updateCost(int server_id, int neighbor_id, int new_cost)
             std::cout<<"SERVER AND NEIGHBOR PAIR FOUND.  UPDATE THE COST IN THE TABLE"<<std::endl;
             neighbor_info update;
             update = my_table.neighbor_list[n_index];
-            update.link_cost = min(update.link_cost,new_cost);
+            update.link_cost = new_cost;
             my_table.neighbor_list[n_index] = update;
         }
     }
@@ -679,6 +678,7 @@ void crash()
         if(my_list.serv_id == list.my_server_id)
         {
             std::string msg = "_CRASH_,";
+            my_list.link_cost = INT_MAX;
             msg += std::to_string(list.my_server_id);
             send_msg(my_list.neighbor_id,msg);
             terminate_socket(my_list.neighbor_id);
@@ -755,6 +755,34 @@ void connect_client(std::string con_ip, std::string con_port)
 void terminate_socket(int sock)
 {
     // http://man7.org/linux/man-pages/man2/shutdown.2.html
+    std::cout<<"sock param: " << sock << std::endl;
+    int sock_fd;
+    server_info the_server;
+
+    for(unsigned int i = 0; i < my_table.num_servers; i++)
+    {
+        the_server = my_table.server_list[i];
+        if(the_server.server_id == sock)
+            break;
+    }
+
+    for(unsigned int i = 0; i < list.client_list.size(); i++)
+    {
+        if(strcmp(the_server.server_ipaddr.c_str(), list.client_list_ad[i].c_str()) == 0)
+        {
+            sock_fd = i;
+            break;
+        }
+    }
+
+    for(unsigned int i = 0; i < my_table.num_neighbors; i++)
+    {
+        neighbor_info to_update = my_table.neighbor_list[i];
+        if(to_update.serv_id == list.my_server_id)
+            if(to_update.neighbor_id == sock)
+                to_update.link_cost = INT_MAX;
+    }
+
     int status = shutdown(list.client_list[sock], SHUT_RDWR); // shutsdown read/write operations on socket
     if(status < 0)
         perror("> Shutdown Error: ");
@@ -1046,9 +1074,4 @@ int getServerbyIP(std::string ip)
             id = temp.server_id;
     }
     return id;
-}
-
-int min(int v1, int v2)
-{
-    return (v1 < v2) ? v1 : v2;
 }
